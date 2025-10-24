@@ -11,6 +11,8 @@ import logging
 from datetime import datetime
 
 from database.connection import connect_to_mongo, close_mongo_connection
+from utils.performance import monitor_performance
+from utils.cache import cache_manager
 from crud.user_crud import user_crud
 from models.user import UserCreate, UserUpdate
 from config import DEBUG
@@ -32,9 +34,9 @@ class UserManagementApp:
     async def start(self):
         """Start the application"""
         try:
-            # Connect to MongoDB
-            connect_to_mongo()
-            logger.info("User Management Application Started")
+            # Connect to MongoDB with async connection pooling
+            await connect_to_mongo()
+            logger.info("User Management Application Started with Performance Optimizations")
             
             # Main application loop
             while self.running:
@@ -47,7 +49,8 @@ class UserManagementApp:
         except Exception as e:
             logger.error(f"Application error: {e}")
         finally:
-            close_mongo_connection()
+            await close_mongo_connection()
+            await cache_manager.close()
             logger.info("Application closed")
     
     async def show_menu(self):
@@ -95,6 +98,7 @@ class UserManagementApp:
             if DEBUG:
                 logger.exception("Error in handle_choice")
     
+    @monitor_performance("create_user")
     async def create_user(self):
         """Create a new user"""
         print("\n--- CREATE NEW USER ---")
@@ -135,6 +139,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error creating user: {e}")
     
+    @monitor_performance("get_user_by_id")
     async def get_user_by_id(self):
         """Get user by ID"""
         print("\n--- GET USER BY ID ---")
@@ -154,6 +159,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error getting user: {e}")
     
+    @monitor_performance("get_user_by_email")
     async def get_user_by_email(self):
         """Get user by email"""
         print("\n--- GET USER BY EMAIL ---")
@@ -173,6 +179,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error getting user: {e}")
     
+    @monitor_performance("list_users")
     async def list_users(self):
         """List all users with pagination"""
         print("\n--- LIST USERS ---")
@@ -208,6 +215,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error listing users: {e}")
     
+    @monitor_performance("search_users")
     async def search_users(self):
         """Search users by name or email"""
         print("\n--- SEARCH USERS ---")
@@ -232,6 +240,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error searching users: {e}")
     
+    @monitor_performance("update_user")
     async def update_user(self):
         """Update user"""
         print("\n--- UPDATE USER ---")
@@ -287,6 +296,7 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error updating user: {e}")
     
+    @monitor_performance("delete_user")
     async def delete_user(self):
         """Delete user"""
         print("\n--- DELETE USER ---")
@@ -318,8 +328,9 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error deleting user: {e}")
     
+    @monitor_performance("get_statistics")
     async def get_statistics(self):
-        """Get user statistics"""
+        """Get user statistics"
         print("\n--- USER STATISTICS ---")
         
         try:
