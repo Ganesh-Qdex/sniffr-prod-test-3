@@ -2,6 +2,7 @@ from pydantic import BaseModel, EmailStr, Field
 from typing import Optional
 from datetime import datetime
 from bson import ObjectId
+from models.auth import UserRole
 
 
 class PyObjectId(ObjectId):
@@ -27,6 +28,8 @@ class UserBase(BaseModel):
     phone: Optional[str] = Field(None, min_length=10, max_length=15)
     address: Optional[str] = Field(None, max_length=500)
     is_active: bool = True
+    role: UserRole = UserRole.USER
+    last_login: Optional[datetime] = None
 
 
 class UserCreate(UserBase):
@@ -40,6 +43,7 @@ class UserUpdate(BaseModel):
     phone: Optional[str] = Field(None, min_length=10, max_length=15)
     address: Optional[str] = Field(None, max_length=500)
     is_active: Optional[bool] = None
+    role: Optional[UserRole] = None
 
 
 class User(UserBase):
@@ -71,6 +75,8 @@ class UserResponse(BaseModel):
     phone: Optional[str]
     address: Optional[str]
     is_active: bool
+    role: UserRole
+    last_login: Optional[datetime]
     created_at: datetime
     updated_at: datetime
 

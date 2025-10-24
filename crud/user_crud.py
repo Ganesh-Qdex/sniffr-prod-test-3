@@ -212,6 +212,8 @@ class UserCRUD:
     
     def _convert_to_response(self, user_doc: Dict[str, Any]) -> UserResponse:
         """Convert MongoDB document to UserResponse"""
+        from models.auth import UserRole
+        
         return UserResponse(
             id=str(user_doc["_id"]),
             name=user_doc["name"],
@@ -220,6 +222,8 @@ class UserCRUD:
             phone=user_doc.get("phone"),
             address=user_doc.get("address"),
             is_active=user_doc.get("is_active", True),
+            role=UserRole(user_doc.get("role", "user")),
+            last_login=user_doc.get("last_login"),
             created_at=user_doc["created_at"],
             updated_at=user_doc["updated_at"]
         )

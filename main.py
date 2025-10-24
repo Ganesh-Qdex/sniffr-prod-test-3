@@ -12,7 +12,11 @@ from datetime import datetime
 
 from database.connection import connect_to_mongo, close_mongo_connection
 from crud.user_crud import user_crud
+from crud.auth_crud import auth_crud
 from models.user import UserCreate, UserUpdate
+from models.auth import UserCreateWithAuth, LoginRequest, ChangePassword, UserRole
+from auth_endpoints import auth_endpoints
+from utils.password import check_password_strength
 from config import DEBUG
 
 # Configure logging
@@ -28,6 +32,8 @@ class UserManagementApp:
     
     def __init__(self):
         self.running = True
+        self.current_user = None
+        self.current_token = None
     
     async def start(self):
         """Start the application"""
@@ -55,41 +61,83 @@ class UserManagementApp:
         print("\n" + "="*50)
         print("           USER MANAGEMENT SYSTEM")
         print("="*50)
-        print("1. Create User")
-        print("2. Get User by ID")
-        print("3. Get User by Email")
-        print("4. List All Users")
-        print("5. Search Users")
-        print("6. Update User")
-        print("7. Delete User")
-        print("8. Get User Statistics")
-        print("9. Exit")
+        
+        if self.current_user:
+            print(f"👤 Logged in as: {self.current_user.name} ({self.current_user.role.value})")
+            print("="*50)
+            print("AUTHENTICATION MENU:")
+            print("1. Logout")
+            print("2. Change Password")
+            print("3. View Profile")
+            print("4. Update Profile")
+            print("="*50)
+            print("USER MANAGEMENT MENU:")
+            print("5. Create User")
+            print("6. Get User by ID")
+            print("7. Get User by Email")
+            print("8. List All Users")
+            print("9. Search Users")
+            print("10. Update User")
+            print("11. Delete User")
+            print("12. Get User Statistics")
+            if self.current_user.role in [UserRole.ADMIN, UserRole.MODERATOR]:
+                print("13. Update User Role")
+            print("14. Exit")
+        else:
+            print("AUTHENTICATION MENU:")
+            print("1. Register")
+            print("2. Login")
+            print("3. Exit")
+        
         print("="*50)
     
     async def handle_choice(self, choice: str):
         """Handle user menu choice"""
         try:
-            if choice == "1":
-                await self.create_user()
-            elif choice == "2":
-                await self.get_user_by_id()
-            elif choice == "3":
-                await self.get_user_by_email()
-            elif choice == "4":
-                await self.list_users()
-            elif choice == "5":
-                await self.search_users()
-            elif choice == "6":
-                await self.update_user()
-            elif choice == "7":
-                await self.delete_user()
-            elif choice == "8":
-                await self.get_statistics()
-            elif choice == "9":
-                self.running = False
-                print("Goodbye!")
+            if self.current_user:
+                # Authenticated user menu
+                if choice == "1":
+                    await self.logout()
+                elif choice == "2":
+                    await self.change_password()
+                elif choice == "3":
+                    await self.view_profile()
+                elif choice == "4":
+                    await self.update_profile()
+                elif choice == "5":
+                    await self.create_user()
+                elif choice == "6":
+                    await self.get_user_by_id()
+                elif choice == "7":
+                    await self.get_user_by_email()
+                elif choice == "8":
+                    await self.list_users()
+                elif choice == "9":
+                    await self.search_users()
+                elif choice == "10":
+                    await self.update_user()
+                elif choice == "11":
+                    await self.delete_user()
+                elif choice == "12":
+                    await self.get_statistics()
+                elif choice == "13" and self.current_user.role in [UserRole.ADMIN, UserRole.MODERATOR]:
+                    await self.update_user_role()
+                elif choice == "14":
+                    self.running = False
+                    print("Goodbye!")
+                else:
+                    print("Invalid choice. Please try again.")
             else:
-                print("Invalid choice. Please try again.")
+                # Unauthenticated user menu
+                if choice == "1":
+                    await self.register()
+                elif choice == "2":
+                    await self.login()
+                elif choice == "3":
+                    self.running = False
+                    print("Goodbye!")
+                else:
+                    print("Invalid choice. Please try again.")
         except Exception as e:
             print(f"Error: {e}")
             if DEBUG:
@@ -336,6 +384,263 @@ class UserManagementApp:
         except Exception as e:
             print(f"❌ Error getting statistics: {e}")
     
+    async def register(self):
+        """Register a new user"""
+        print("\n--- USER REGISTRATION ---")
+        
+        try:
+            name = input("Enter name: ").strip()
+            if not name:
+                print("Name is required!")
+                return
+            
+            email = input("Enter email: ").strip()
+            if not email:
+                print("Email is required!")
+                return
+            
+            password = input("Enter password: ").strip()
+            if not password:
+                print("Password is required!")
+                return
+            
+            # Check password strength
+            password_check = check_password_strength(password)
+            if not password_check["is_valid"]:
+                print(f"❌ Password validation failed:")
+                for issue in password_check["issues"]:
+                    print(f"   - {issue}")
+                if password_check["suggestions"]:
+                    print("Suggestions:")
+                    for suggestion in password_check["suggestions"]:
+                        print(f"   - {suggestion}")
+                return
+            
+            age_input = input("Enter age (optional): ").strip()
+            age = int(age_input) if age_input else None
+            
+            phone = input("Enter phone (optional): ").strip() or None
+            address = input("Enter address (optional): ").strip() or None
+            
+            # Create user data
+            user_data = UserCreateWithAuth(
+                name=name,
+                email=email,
+                password=password,
+                age=age,
+                phone=phone,
+                address=address,
+                role=UserRole.USER
+            )
+            
+            # Register user
+            auth_response = await auth_endpoints.register(user_data)
+            self.current_user = auth_response.user
+            self.current_token = auth_response.token.access_token
+            
+            print(f"\n✅ Registration successful!")
+            print(f"Welcome, {self.current_user.name}!")
+            
+        except ValueError as e:
+            print(f"❌ Validation error: {e}")
+        except Exception as e:
+            print(f"❌ Error registering user: {e}")
+    
+    async def login(self):
+        """Login user"""
+        print("\n--- USER LOGIN ---")
+        
+        try:
+            email = input("Enter email: ").strip()
+            if not email:
+                print("Email is required!")
+                return
+            
+            password = input("Enter password: ").strip()
+            if not password:
+                print("Password is required!")
+                return
+            
+            # Create login data
+            login_data = LoginRequest(email=email, password=password)
+            
+            # Login user
+            auth_response = await auth_endpoints.login(login_data)
+            self.current_user = auth_response.user
+            self.current_token = auth_response.token.access_token
+            
+            print(f"\n✅ Login successful!")
+            print(f"Welcome back, {self.current_user.name}!")
+            
+        except ValueError as e:
+            print(f"❌ Login error: {e}")
+        except Exception as e:
+            print(f"❌ Error logging in: {e}")
+    
+    async def logout(self):
+        """Logout current user"""
+        print("\n--- LOGOUT ---")
+        
+        if self.current_user:
+            print(f"Goodbye, {self.current_user.name}!")
+            self.current_user = None
+            self.current_token = None
+        else:
+            print("You are not logged in!")
+    
+    async def change_password(self):
+        """Change current user password"""
+        print("\n--- CHANGE PASSWORD ---")
+        
+        if not self.current_user:
+            print("❌ You must be logged in to change password!")
+            return
+        
+        try:
+            current_password = input("Enter current password: ").strip()
+            if not current_password:
+                print("Current password is required!")
+                return
+            
+            new_password = input("Enter new password: ").strip()
+            if not new_password:
+                print("New password is required!")
+                return
+            
+            # Check new password strength
+            password_check = check_password_strength(new_password)
+            if not password_check["is_valid"]:
+                print(f"❌ New password validation failed:")
+                for issue in password_check["issues"]:
+                    print(f"   - {issue}")
+                return
+            
+            confirm_password = input("Confirm new password: ").strip()
+            if new_password != confirm_password:
+                print("❌ Passwords do not match!")
+                return
+            
+            # Change password
+            password_data = ChangePassword(
+                current_password=current_password,
+                new_password=new_password
+            )
+            
+            success = await auth_endpoints.change_password(
+                self.current_user.id, 
+                password_data
+            )
+            
+            if success:
+                print("✅ Password changed successfully!")
+            else:
+                print("❌ Failed to change password!")
+                
+        except ValueError as e:
+            print(f"❌ Password change error: {e}")
+        except Exception as e:
+            print(f"❌ Error changing password: {e}")
+    
+    async def view_profile(self):
+        """View current user profile"""
+        print("\n--- YOUR PROFILE ---")
+        
+        if not self.current_user:
+            print("❌ You must be logged in to view profile!")
+            return
+        
+        self._display_user(self.current_user)
+    
+    async def update_profile(self):
+        """Update current user profile"""
+        print("\n--- UPDATE PROFILE ---")
+        
+        if not self.current_user:
+            print("❌ You must be logged in to update profile!")
+            return
+        
+        try:
+            print(f"Current profile: {self.current_user.name} ({self.current_user.email})")
+            print("Enter new values (press Enter to keep current value):")
+            
+            # Get update data
+            name = input(f"Name [{self.current_user.name}]: ").strip() or self.current_user.name
+            email = input(f"Email [{self.current_user.email}]: ").strip() or self.current_user.email
+            
+            age_input = input(f"Age [{self.current_user.age or 'None'}]: ").strip()
+            age = int(age_input) if age_input else self.current_user.age
+            
+            phone = input(f"Phone [{self.current_user.phone or 'None'}]: ").strip() or self.current_user.phone
+            address = input(f"Address [{self.current_user.address or 'None'}]: ").strip() or self.current_user.address
+            
+            # Create update data
+            update_data = UserUpdate(
+                name=name,
+                email=email,
+                age=age,
+                phone=phone,
+                address=address
+            )
+            
+            # Update user
+            updated_user = await user_crud.update_user(self.current_user.id, update_data)
+            if updated_user:
+                self.current_user = updated_user
+                print(f"\n✅ Profile updated successfully!")
+                self._display_user(updated_user)
+            else:
+                print("❌ Failed to update profile!")
+                
+        except ValueError as e:
+            print(f"❌ Validation error: {e}")
+        except Exception as e:
+            print(f"❌ Error updating profile: {e}")
+    
+    async def update_user_role(self):
+        """Update user role (admin/moderator only)"""
+        print("\n--- UPDATE USER ROLE ---")
+        
+        if not self.current_user or self.current_user.role not in [UserRole.ADMIN, UserRole.MODERATOR]:
+            print("❌ You don't have permission to update user roles!")
+            return
+        
+        try:
+            user_id = input("Enter user ID: ").strip()
+            if not user_id:
+                print("User ID is required!")
+                return
+            
+            print("Available roles:")
+            print("1. user")
+            print("2. moderator")
+            print("3. admin")
+            
+            role_choice = input("Select role (1-3): ").strip()
+            role_map = {"1": "user", "2": "moderator", "3": "admin"}
+            
+            if role_choice not in role_map:
+                print("❌ Invalid role choice!")
+                return
+            
+            new_role = role_map[role_choice]
+            
+            # Update role
+            success = await auth_endpoints.update_user_role(
+                user_id, 
+                new_role, 
+                self.current_token
+            )
+            
+            if success:
+                print(f"✅ User role updated to {new_role}!")
+            else:
+                print("❌ Failed to update user role!")
+                
+        except ValueError as e:
+            print(f"❌ Role update error: {e}")
+        except Exception as e:
+            print(f"❌ Error updating user role: {e}")
+    
     def _display_user(self, user):
         """Display user information in a formatted way"""
         print(f"\n👤 User Details:")
@@ -346,6 +651,8 @@ class UserManagementApp:
         print(f"   Phone: {user.phone or 'Not specified'}")
         print(f"   Address: {user.address or 'Not specified'}")
         print(f"   Active: {'Yes' if user.is_active else 'No'}")
+        print(f"   Role: {user.role.value}")
+        print(f"   Last Login: {user.last_login.strftime('%Y-%m-%d %H:%M:%S') if user.last_login else 'Never'}")
         print(f"   Created: {user.created_at.strftime('%Y-%m-%d %H:%M:%S')}")
         print(f"   Updated: {user.updated_at.strftime('%Y-%m-%d %H:%M:%S')}")
 
